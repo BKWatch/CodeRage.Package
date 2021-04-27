@@ -1310,6 +1310,7 @@ trait Robot {
         $handleError =
             function($error) use($method, $uri, $test)
             {
+                $this->logMessage("SESSION: Failed requesting URI $uri: " . $error);
                 foreach ($this->requestLoggers as $logger)
                     $logger->postRequest($this, $method, $uri, $error);
                 if ($this->response() === null)
@@ -1327,6 +1328,7 @@ trait Robot {
             };
 
         // Execute operation
+        $this->logMessage("SESSION: Requesting URI $uri");
         $this->crawler =
             $this->repeatOperation(
                 $operation,
