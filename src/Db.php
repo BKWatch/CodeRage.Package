@@ -161,11 +161,7 @@ final class Db extends \CodeRage\Db\Object_ {
      */
     public function beginTransaction(): void
     {
-        $transactionDepth = self::transactionDepth();
-        $conn = $this->connection();
-        if (!isset($transactionDepth[$conn]))
-            $transactionDepth[$conn] = 0;
-        if (!$this->impl->nestable && $transactionDepth[$conn] > 0)
+        if (!$this->impl->nestable && $this->impl->depth > 0)
             throw new
                 Error([
                     'status' => 'STATE_ERROR',
@@ -173,9 +169,9 @@ final class Db extends \CodeRage\Db\Object_ {
                         'This instance of CodeRage\Db does not support ' .
                         'nested transactions'
                 ]);
-        if ($transactionDepth[$conn] == 0) {
+        if ($this->impl->depth == 0) {
             try {
-                $conn->beginTransaction();
+                $this->connection()->beginTransaction();
             } catch (PDOException $e) {
                 throw new
                     Error([
@@ -185,7 +181,7 @@ final class Db extends \CodeRage\Db\Object_ {
                     ]);
             }
         }
-        $transactionDepth[$conn] += 1;
+        ++$this->impl->depth;
     }
 
     /**
@@ -195,14 +191,9 @@ final class Db extends \CodeRage\Db\Object_ {
      */
     public function commit(): void
     {
-        $transactionDepth = self::transactionDepth();
-        $conn = $this->connection();
-        if (!isset($transactionDepth[$conn]))
-            $transactionDepth[$conn] = 0;
-        $transactionDepth[$conn] -= 1;
-        if ($transactionDepth[$conn] == 0) {
+        if ($this->impl->depth == 1) {
             try {
-                $conn->commit();
+                $this->connection()->commit();
             } catch (PDOException $e) {
                 throw new
                     Error([
@@ -212,6 +203,7 @@ final class Db extends \CodeRage\Db\Object_ {
                     ]);
             }
         }
+        --$this->impl->depth;
     }
 
     /**
@@ -221,14 +213,9 @@ final class Db extends \CodeRage\Db\Object_ {
      */
     public function rollback(): void
     {
-        $transactionDepth = self::transactionDepth();
-        $conn = $this->connection();
-        if (!isset($transactionDepth[$conn]))
-            $transactionDepth[$conn] = 0;
-        $transactionDepth[$conn] -= 1;
-        if ($transactionDepth[$conn] == 0) {
+        if ($this->impl->depth == 1) {
             try {
-                $conn->rollback();
+                $this->connection()->rollback();
             } catch (PDOException $e) {
                 throw new
                     Error([
@@ -237,7 +224,16 @@ final class Db extends \CodeRage\Db\Object_ {
                         'inner' => $e
                     ]);
             }
+            foreach ($this->impl->rollbacks as $f) {
+                try {
+                    $f();
+                } catch (Throwable $ignore) {
+                    // No-op
+                }
+            }
+            $this->impl->rollbacks = [];
         }
+        --$this->impl->depth;
     }
 
     /**
@@ -748,8 +744,6 @@ final class Db extends \CodeRage\Db\Object_ {
      * @param callable $func A callable with a single parameter of type
      *   CodeRage\Db; if will be passed this instance as argument
      * @param array $options The options array; supports the following options:
-     *     rollback - A callable taking an instance of CodeRage\Db to be invoked
-     *       after the transaction is rolled back
      *     processError - A callable taking a caught exception object and an
      *       instance of CodeRage\Db and returning a new exception object to
      *       throw instead
@@ -758,7 +752,6 @@ final class Db extends \CodeRage\Db\Object_ {
     public function runInTransaction($func, array $options = [])
     {
         Args::check($func, 'callable', 'callback');
-        $rollback = Args::checkKey($options, 'rollback', 'callable');
         $process = Args::checkKey($options, 'processError', 'callable');
         $this->beginTransaction();
         $result = null;
@@ -766,9 +759,6 @@ final class Db extends \CodeRage\Db\Object_ {
             $result = $func($this);
         } catch (Throwable $e) {
             $this->rollback();
-            if ($rollback !== null) {
-                $rollback($this);
-            }
             if ($process != null) {
                 $e = $process($e, $this);
             }
@@ -910,6 +900,23 @@ final class Db extends \CodeRage\Db\Object_ {
     }
 
     /**
+     * Registers a callable to be executed when and if the current transaction,
+     * if any, is rolled back
+     *
+     * @param callable $handler The callable
+     * @return boolean true if a transaction is in progress
+     */
+    public function registerRollbackHandler(callable $handler): bool
+    {
+        if ($this->impl->depth > 0) {
+            $this->impl->depth->rollbacks[] = $handler;
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
      * Registers a hook
      *
      * @param array $options The options array; supports the following options:
@@ -964,8 +971,8 @@ final class Db extends \CodeRage\Db\Object_ {
     }
 
     /**
-     * Returns an object with "params", "connection", "nestable", and "hooks"
-     * properties
+     * Returns an object with "params", "connection", "nestable", "depth",
+     * "roolbacks", and "hooks" properties
      *
      * @param CodeRage\Db\Params $params
      * @return object
@@ -977,22 +984,10 @@ final class Db extends \CodeRage\Db\Object_ {
                 'params' => $params,
                 'connection' => null,
                 'nestable' => true,
+                'depth' => 0,
+                'rollbacks' => [],
                 'hooks' => []
             ];
-    }
-
-    /**
-     * Returns a static data structure mapping PDO objects to simulated
-     * transaction depth
-     *
-     * @return SplObjectStorage
-     */
-    private static function transactionDepth(): \SplObjectStorage
-    {
-        static $transactionDepth;
-        if ($transactionDepth === null)
-            $transactionDepth = new \SplObjectStorage;
-        return $transactionDepth;
     }
 
     /**
@@ -1032,14 +1027,15 @@ final class Db extends \CodeRage\Db\Object_ {
 
     /**
      * Associative array mapping cache IDs to objects with "params",
-     * "connection", "nestable", and "hooks" properties
+     * "connection", "nestable", "depth", "roolbacks", and "hooks" properties
      *
      * @var array
      */
     private static $cache = [];
 
     /**
-     * An object with "params", "connection", "nestable", and "hooks" properties
+     * An object with "params", "connection", "nestable", "depth", "roolbacks",
+     * and "hooks" properties
      *
      * @var object
      */
