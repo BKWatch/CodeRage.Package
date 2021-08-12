@@ -373,7 +373,7 @@ final class Db extends \CodeRage\Db\Object_ {
         $conds = [];  // Conditions
         $cvals = [];
         foreach ($where as $c => $v) {
-            if (!ctype_alnum($c))
+            if (!preg_match('/^[_a-zA-Z0-9]+$/', $c))
                 throw new
                     Error([
                         'status' => 'INVALID_PARAMETER',
@@ -397,7 +397,7 @@ final class Db extends \CodeRage\Db\Object_ {
         $set = [];
         $svals = [];
         foreach ($values as $c => $v) {
-            if (!ctype_alnum($c))
+            if (!preg_match('/^[_a-zA-Z0-9]+$/', $c))
                 throw new
                     Error([
                         'status' => 'INVALID_PARAMETER',
@@ -440,7 +440,7 @@ final class Db extends \CodeRage\Db\Object_ {
         $conds = [];  // Conditions
         $whereVals = [];
         foreach ($where as $c => $v) {
-            if (!ctype_alnum($c))
+            if (!preg_match('/^[_a-zA-Z0-9]+$/', $c))
                 throw new
                     Error([
                         'status' => 'INVALID_PARAMETER',
@@ -460,7 +460,7 @@ final class Db extends \CodeRage\Db\Object_ {
                 $set = [];
                 $setVals = [];
                 foreach ($values as $c => $v) {
-                    if (!ctype_alnum($c))
+                    if (!preg_match('/^[_a-zA-Z0-9]+$/', $c))
                         throw new
                             Error([
                                 'status' => 'INVALID_PARAMETER',
@@ -500,7 +500,7 @@ final class Db extends \CodeRage\Db\Object_ {
         $conds = [];  // Conditions
         $vals = [];
         foreach ($where as $c => $v) {
-            if (!ctype_alnum($c)) {
+            if (!preg_match('/^[_a-zA-Z0-9]+$/', $c)) {
                 if (!$nothrow)
                     throw new
                         Error([
